@@ -50,7 +50,7 @@ class GameBotService : AccessibilityService() {
     }
 
     private fun findTargetNode(rootNode: AccessibilityNodeInfo): AccessibilityNodeInfo? {
-        val textButtons = listOf("Next", "Continue", "Finish")
+        val textButtons = listOf("Next", "Continue", "Finish", "Skip", "Skip Ad", "Claim", "Collect", "Reward")
         for (text in textButtons) {
             val nodes = rootNode.findAccessibilityNodeInfosByText(text)
             for (node in nodes) {
@@ -59,8 +59,11 @@ class GameBotService : AccessibilityService() {
         }
 
         // Search by content description
-        val closeAdNode = findNodeByDescription(rootNode, "Close Ad")
-        if (closeAdNode != null) return closeAdNode
+        val descriptions = listOf("Close Ad", "Close", "Dismiss", "Skip")
+        for (desc in descriptions) {
+            val node = findNodeByDescription(rootNode, desc)
+            if (node != null) return node
+        }
 
         return findFacebookCloseButton(rootNode)
     }
