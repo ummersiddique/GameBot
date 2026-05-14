@@ -1,56 +1,61 @@
 package com.game.bot
 
 import android.accessibilityservice.AccessibilityService
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import androidx.core.app.NotificationCompat
 import kotlin.random.Random
 
 class GameBotService : AccessibilityService() {
 
-    private var currentActivityName: CharSequence? = null
     private val handler = Handler(Looper.getMainLooper())
     private var isActionPending = false
+    private var currentActivityName: CharSequence? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        createNotificationChannel()
+        startForeground(1, createNotification())
+    }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
-        val rootNode = rootInActiveWindow ?: return
-
-        // Update current activity if the event tells us
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             currentActivityName = event.className
         }
 
-        val packageName = rootNode.packageName?.toString() ?: ""
-        
-        // Robust target detection:
-        // 1. Check if the package is ours (for testing)
-        // 2. Check if the activity name contains AudienceNetworkActivity
-        // 3. Check if the event's package name belongs to a known ad provider (optional)
-        val isTarget = currentActivityName?.contains("AudienceNetworkActivity") == true || 
-                       currentActivityName?.contains("MainActivity") == true ||
-                       packageName == "com.game.bot"
+        val rootNode = rootInActiveWindow ?: return
 
-        if (!isTarget) return
+        // If we are waiting for a click to execute, don't do anything else
         if (isActionPending) return
 
-        if (isProgressFinished(rootNode)) {
-            val targetNode = findTargetNode(rootNode)
-            if (targetNode != null) {
-                Log.e("GameBotService", "Progress completed")
-                performDelayedClick(targetNode)
-            }
-        } else {
-            // Only log this occasionally or on specific events to avoid log flooding
-            if (event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
-                Log.e("GameBotService", "Waiting for progress to complete")
-            }
+        // Strictly restrict to Facebook Audience Network Activity
+        // (Also allowing MainActivity for your local testing)
+        val isTargetActivity = currentActivityName?.contains("AudienceNetworkActivity") == true ||
+                       currentActivityName?.contains("MainActivity") == true
+
+        if (!isTargetActivity) return
+
+        val targetNode = findTargetNode(rootNode)
+        val hasProgressBar = !isProgressFinished(rootNode)
+
+        if (hasProgressBar) {
+            Log.e("GameBotService", "Waiting for progress to complete")
+        } else if (targetNode != null) {
+            Log.e("GameBotService", "Progress completed - Target found: ${targetNode.text ?: targetNode.contentDescription}")
+            performDelayedClick(targetNode)
         }
     }
 
     private fun findTargetNode(rootNode: AccessibilityNodeInfo): AccessibilityNodeInfo? {
-        val textButtons = listOf("Next", "Continue", "Finish", "Skip", "Skip Ad", "Claim", "Collect", "Reward")
+        // Look for buttons that give rewards or close ads
+        val textButtons = listOf("Claim", "Collect", "Reward", "Skip Ad", "Skip", "Finish", "Next")
         for (text in textButtons) {
             val nodes = rootNode.findAccessibilityNodeInfosByText(text)
             for (node in nodes) {
@@ -58,13 +63,14 @@ class GameBotService : AccessibilityService() {
             }
         }
 
-        // Search by content description
+        // Look for content descriptions (X buttons often have these)
         val descriptions = listOf("Close Ad", "Close", "Dismiss", "Skip")
         for (desc in descriptions) {
             val node = findNodeByDescription(rootNode, desc)
             if (node != null) return node
         }
 
+        // Facebook Ads fallback (Clickable container with ImageView)
         return findFacebookCloseButton(rootNode)
     }
 
@@ -99,6 +105,7 @@ class GameBotService : AccessibilityService() {
             }
             return null
         }
+        // Start from the end as ad close buttons are usually late in the hierarchy
         for (i in rootNode.childCount - 1 downTo 0) {
             val child = rootNode.getChild(i) ?: continue
             val found = search(child)
@@ -151,6 +158,26 @@ class GameBotService : AccessibilityService() {
         return foundNodes
     }
 
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                "game_bot_channel",
+                "Game Bot Service",
+                NotificationManager.IMPORTANCE_LOW
+            )
+            val manager = getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(channel)
+        }
+    }
+
+    private fun createNotification(): Notification {
+        return NotificationCompat.Builder(this, "game_bot_channel")
+            .setContentTitle("Game Bot is Running")
+            .setContentText("Monitoring for rewards...")
+            .setSmallIcon(android.R.drawable.ic_menu_compass)
+            .build()
+    }
+
     override fun onInterrupt() {
         Log.e("GameBotService", "Service Interrupted")
         handler.removeCallbacksAndMessages(null)
@@ -159,6 +186,6 @@ class GameBotService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
-        Log.e("GameBotService", "Service Connected")
+        Log.e("GameBotService", "Service Connected and Foregrounded")
     }
 }
