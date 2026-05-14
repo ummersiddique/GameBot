@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">GameBot</string>
+    <string name="accessibility_service_description">Repeats predefined actions on screen.</string>
+</resources>
